@@ -13,6 +13,7 @@ class DepartmentWebPortalScreen extends StatefulWidget {
 }
 
 class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
+  static const _printChannel = MethodChannel('in.gov.rajasthan.kdakota.enivaran/print');
   late final WebViewController _controller;
   bool _isLoading = true;
   double _progress = 0;
@@ -29,12 +30,6 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0F172A))
-      ..addJavaScriptChannel(
-        'PrintChannel',
-        onMessageReceived: (JavaScriptMessage message) {
-          _handlePrint();
-        },
-      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (int progress) {
@@ -87,70 +82,69 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
           },
         ),
       )
+      ..addJavaScriptChannel(
+        'FlutterPrintChannel',
+        onMessageReceived: (JavaScriptMessage message) {
+          _handlePrintMessage(message.message);
+        },
+      )
       ..loadRequest(Uri.parse(targetUrl));
   }
 
-  Future<void> _handlePrint() async {
+  void _handlePrintMessage(String payload) async {
     try {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                ),
-                SizedBox(width: 12),
-                Text("Opening Print / Save as PDF..."),
-              ],
-            ),
-            duration: Duration(seconds: 2),
-            backgroundColor: Color(0xFF1E293B),
-          ),
-        );
-      }
+      final data = jsonDecode(payload) as Map<String, dynamic>;
+      final html = data['html'] as String? ?? '';
+      final title = data['title'] as String? ?? 'KDA-Complaint-Print';
+      final url = data['url'] as String? ?? ApiConfig.baseUrl;
 
-      String title = "Complaint_Details";
-      try {
-        final rawTitle = await _controller.runJavaScriptReturningResult("document.title");
-        var titleStr = rawTitle.toString().replaceAll('"', '').trim();
-        if (titleStr.isNotEmpty && titleStr != "null") title = titleStr;
-      } catch (_) {}
-
-      final rawHtml = await _controller.runJavaScriptReturningResult("document.documentElement.outerHTML");
-      String html = rawHtml.toString();
-      try {
-        final decoded = jsonDecode(html);
-        if (decoded is String) html = decoded;
-      } catch (_) {}
-
-      const platform = MethodChannel('in.gov.rajasthan.kdakota.enivaran/print');
-      await platform.invokeMethod('printHtml', {
+      await _printChannel.invokeMethod('printHtml', {
         'html': html,
+        'baseUrl': url,
         'title': title,
       });
     } catch (e) {
-      debugPrint("Print handler error: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Print error: $e"),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
+      debugPrint("FlutterPrintChannel error: $e");
     }
   }
 
   void _injectPortalModifications() {
     // Injected script handles:
-    // 1. Completely removing 'Go to Citizen', 'Citizen Login', and 'Install App'
-    // 2. Ensuring Dark Mode cards and Light Mode cards are razor-sharp with proper contrast
-    // 3. Ensuring Status Chart has an elegant Empty State if count is 0
+    // 1. Native Android Print interception for window.print()
+    // 2. Completely removing 'Go to Citizen', 'Citizen Login', and 'Install App'
+    // 3. Ensuring Dark Mode cards and Light Mode cards are razor-sharp with proper contrast
+    // 4. Ensuring Status Chart has an elegant Empty State if count is 0
     _controller.runJavaScript(r"""
       (function() {
+        // ── Window.print Interception for Native Android Print Spooler ──
+        window.print = function() {
+          if (window.FlutterPrintChannel) {
+            try {
+              window.FlutterPrintChannel.postMessage(JSON.stringify({
+                html: document.documentElement.outerHTML,
+                url: window.location.href,
+                title: document.title || 'KDA-Complaint-Print'
+              }));
+            } catch (err) {
+              console.error('Print channel error:', err);
+            }
+          }
+        };
+
+        // Attach delegated listener on all print buttons and links
+        document.addEventListener('click', function(e) {
+          var btn = e.target.closest('button, a');
+          if (btn) {
+            var onclickAttr = btn.getAttribute('onclick') || '';
+            var txt = (btn.textContent || '').toLowerCase();
+            if (onclickAttr.indexOf('print') !== -1 || txt.indexOf('print') !== -1 || btn.querySelector('.fa-print')) {
+              e.preventDefault();
+              e.stopPropagation();
+              window.print();
+            }
+          }
+        }, true);
+
         // 1. Hide Citizen Login and Install App items
         var citizenElements = document.querySelectorAll(
           'a[href*="/auth/login"]:not([href*="department"]), ' +
@@ -646,47 +640,12 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
             if (!emptyBox) {
               emptyBox = document.createElement('div');
               emptyBox.className = 'chart-empty-state text-center p-3';
+              emptyBox.innerHTML = '<div style="font-size:32px;margin-bottom:8px">📊</div><div style="font-weight:600;font-size:14px;color:#94a3b8">All Grievances Addressed</div><div style="font-size:12px;color:#64748b">No active complaints pending in queue</div>';
               chartCanvas.style.display = 'none';
               chartCanvas.parentNode.appendChild(emptyBox);
             }
           }
         }
-
-        // 4. Intercept window.print and Print Buttons for native Android printing
-        window.print = function() {
-          if (window.PrintChannel) {
-            window.PrintChannel.postMessage('print');
-          }
-        };
-
-        function attachPrintListeners() {
-          var allPrintButtons = document.querySelectorAll(
-            'button[onclick*="print"], ' +
-            'a[onclick*="print"], ' +
-            '.btn-outline-primary, ' +
-            'button, .btn'
-          );
-          for (var pb = 0; pb < allPrintButtons.length; pb++) {
-            var item = allPrintButtons[pb];
-            var oc = (item.getAttribute('onclick') || '').toLowerCase();
-            var inner = (item.innerHTML || '').toLowerCase();
-            var text = (item.textContent || '').toLowerCase();
-            if (oc.includes('print') || text.includes('print') || inner.includes('fa-print')) {
-              if (!item.dataset.printHooked) {
-                item.dataset.printHooked = 'true';
-                item.addEventListener('click', function(ev) {
-                  if (window.PrintChannel) {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    window.PrintChannel.postMessage('print');
-                  }
-                }, true);
-              }
-            }
-          }
-        }
-        attachPrintListeners();
-        setInterval(attachPrintListeners, 1000);
       })();
     """);
   }

@@ -14,38 +14,55 @@ class MainActivity: FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             if (call.method == "printHtml") {
                 val html = call.argument<String>("html")
-                val title = call.argument<String>("title") ?: "Complaint"
+                val baseUrl = call.argument<String>("baseUrl") ?: "https://kdakota.rajasthan.gov.in/enivaran/"
+                val title = call.argument<String>("title") ?: "KDA-Complaint-Print"
+
                 if (html != null) {
-                    runOnUiThread {
-                        val printWebView = WebView(this)
-                        printWebView.settings.javaScriptEnabled = true
-                        printWebView.settings.domStorageEnabled = true
-                        printWebView.loadDataWithBaseURL("https://kdakota.rajasthan.gov.in/enivaran/", html, "text/html", "UTF-8", null)
-                        printWebView.webViewClient = object : WebViewClient() {
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                try {
-                                    val printManager = getSystemService(Context.PRINT_SERVICE) as PrintManager
-                                    val printAdapter = printWebView.createPrintDocumentAdapter(title)
-                                    val builder = PrintAttributes.Builder()
-                                    builder.setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-                                    printManager.print(title, printAdapter, builder.build())
-                                    result.success(true)
-                                } catch (e: Exception) {
-                                    result.error("PRINT_FAILED", e.message, null)
-                                }
-                            }
-                        }
-                    }
+                    printHtmlContent(html, baseUrl, title)
+                    result.success(true)
                 } else {
-                    result.error("INVALID_ARGS", "HTML content is null", null)
+                    result.error("INVALID_ARGUMENT", "HTML content is null", null)
                 }
             } else {
                 result.notImplemented()
             }
+        }
+    }
+
+    private fun printHtmlContent(html: String, baseUrl: String, title: String) {
+        runOnUiThread {
+            val printWebView = WebView(this)
+            printWebView.settings.javaScriptEnabled = true
+            printWebView.settings.domStorageEnabled = true
+            printWebView.settings.loadWithOverviewMode = true
+            printWebView.settings.useWideViewPort = true
+
+            printWebView.webViewClient = object : WebViewClient() {
+                private var hasPrinted = false
+                override fun onPageFinished(view: WebView, url: String) {
+                    if (!hasPrinted) {
+                        hasPrinted = true
+                        view.postDelayed({
+                            val printManager = getSystemService(Context.PRINT_SERVICE) as? PrintManager
+                            if (printManager != null) {
+                                val printAdapter = view.createPrintDocumentAdapter(title)
+                                val printAttributes = PrintAttributes.Builder()
+                                    .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
+                                    .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                                    .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+                                    .build()
+                                printManager.print(title, printAdapter, printAttributes)
+                            }
+                        }, 500)
+                    }
+                }
+            }
+
+            printWebView.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
         }
     }
 }
