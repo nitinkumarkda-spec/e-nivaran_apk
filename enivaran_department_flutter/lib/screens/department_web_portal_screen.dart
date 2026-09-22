@@ -19,7 +19,6 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
   double _progress = 0;
   bool _hasError = false;
   String _errorMessage = '';
-  DateTime? _lastBackPressTime;
 
   @override
   void initState() {
@@ -131,6 +130,10 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
             subType: '',
             zone: '',
             address: '',
+            citizenName: '',
+            citizenMobile: '',
+            registeredOn: '',
+            registeredBy: '',
             citizenPhotoBase64: '',
             citizenPhotoUrl: '',
             history: []
@@ -185,6 +188,29 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
                     data.address = pParent.textContent.trim().replace(/^Address\s*/i, '');
                   }
                 }
+              } else if (headerTxt.indexOf('citizen info') !== -1) {
+                var detailItems = card.querySelectorAll('.detail-item');
+                detailItems.forEach(function(item) {
+                  var lblEl = item.querySelector('label');
+                  var spanEl = item.querySelector('span');
+                  var lbl = (lblEl ? lblEl.textContent : '').trim().toLowerCase();
+                  var val = (spanEl ? spanEl.textContent : '').trim();
+                  if (lbl.indexOf('name') !== -1) data.citizenName = val;
+                  else if (lbl.indexOf('mobile') !== -1) {
+                    var aCall = item.querySelector('a[href^="tel:"]');
+                    data.citizenMobile = aCall ? aCall.textContent.trim() : val;
+                  }
+                });
+              } else if (headerTxt.indexOf('timestamp') !== -1) {
+                var detailItems = card.querySelectorAll('.detail-item');
+                detailItems.forEach(function(item) {
+                  var lblEl = item.querySelector('label');
+                  var spanEl = item.querySelector('span');
+                  var lbl = (lblEl ? lblEl.textContent : '').trim().toLowerCase();
+                  var val = (spanEl ? spanEl.textContent : '').trim();
+                  if (lbl.indexOf('registered on') !== -1) data.registeredOn = val;
+                  else if (lbl.indexOf('registered by') !== -1) data.registeredBy = val;
+                });
               } else if (headerTxt.indexOf('citizen') !== -1 || headerTxt.indexOf('submitted') !== -1) {
                 var img = card.querySelector('img.kda-thumb, img');
                 if (img && img.src) {
@@ -842,19 +868,7 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
 
   Future<bool> _handleWillPop() async {
     if (await _controller.canGoBack()) {
-      _controller.goBack();
-      return false;
-    }
-
-    final now = DateTime.now();
-    if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
-      _lastBackPressTime = now;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Press back again to exit KDA Department App"),
-          duration: Duration(seconds: 2),
-        ),
-      );
+      await _controller.goBack();
       return false;
     }
     return true;

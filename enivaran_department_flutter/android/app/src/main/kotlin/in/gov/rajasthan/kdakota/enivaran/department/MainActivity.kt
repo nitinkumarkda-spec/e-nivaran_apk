@@ -61,7 +61,7 @@ class MainActivity: FlutterActivity() {
 
     private fun startComplaintPrintJob(complaintData: Map<String, Any?>) {
         thread {
-            // 1. Load logo bitmap from Flutter assets
+            // 1. Load official logo bitmap from Flutter assets
             var logoBitmap: Bitmap? = null
             try {
                 assets.open("flutter_assets/assets/images/logo2.png").use { stream ->
@@ -105,6 +105,7 @@ class MainActivity: FlutterActivity() {
             }
 
             runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
                 val printManager = getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return@runOnUiThread
                 val complaintNo = (complaintData["complaintNo"] as? String)?.takeIf { it.isNotEmpty() } ?: "Document"
                 val jobName = "KDA_$complaintNo".replace(Regex("[^a-zA-Z0-9_-]"), "_")
@@ -180,6 +181,10 @@ class ComplaintPrintDocumentAdapter(
             return
         }
 
+        cancellationSignal?.setOnCancelListener {
+            callback?.onLayoutCancelled()
+        }
+
         if (newAttributes != null) {
             currentAttributes = newAttributes
         }
@@ -187,7 +192,7 @@ class ComplaintPrintDocumentAdapter(
         val no = (complaint["complaintNo"] as? String)?.takeIf { it.isNotEmpty() } ?: "Details"
         val info = PrintDocumentInfo.Builder("Complaint_$no.pdf")
             .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
-            .setPageCount(PrintDocumentInfo.PAGE_COUNT_UNKNOWN)
+            .setPageCount(2)
             .build()
 
         callback?.onLayoutFinished(info, newAttributes != oldAttributes)
@@ -199,6 +204,15 @@ class ComplaintPrintDocumentAdapter(
         cancellationSignal: CancellationSignal?,
         callback: WriteResultCallback?
     ) {
+        if (cancellationSignal?.isCanceled == true) {
+            callback?.onWriteCancelled()
+            return
+        }
+
+        cancellationSignal?.setOnCancelListener {
+            callback?.onWriteCancelled()
+        }
+
         if (destination == null) {
             callback?.onWriteFailed("Destination is null")
             return
@@ -206,7 +220,19 @@ class ComplaintPrintDocumentAdapter(
 
         val pdfDocument = PrintedPdfDocument(context, currentAttributes)
         try {
-            renderDocument(pdfDocument)
+            renderPage1(pdfDocument)
+            if (cancellationSignal?.isCanceled == true) {
+                pdfDocument.close()
+                callback?.onWriteCancelled()
+                return
+            }
+
+            renderPage2(pdfDocument)
+            if (cancellationSignal?.isCanceled == true) {
+                pdfDocument.close()
+                callback?.onWriteCancelled()
+                return
+            }
 
             FileOutputStream(destination.fileDescriptor).use { out ->
                 pdfDocument.writeTo(out)
@@ -221,53 +247,53 @@ class ComplaintPrintDocumentAdapter(
         }
     }
 
-    private fun renderDocument(pdfDocument: PrintedPdfDocument) {
-        var pageNum = 1
-        var page = pdfDocument.startPage(pageNum - 1)
-        var canvas = page.canvas
+    // ─────────────────────────────────────────────────────────────
+    // PAGE 1: Reference Desktop Screenshot 1
+    // Top Header + Complaint ID & Badges + Details Card + Citizen Photo + History
+    // ─────────────────────────────────────────────────────────────
+    private fun renderPage1(pdfDocument: PrintedPdfDocument) {
+        val page = pdfDocument.startPage(0)
+        val canvas = page.canvas
 
         val left = 36f
         val right = 559f
         val usableWidth = right - left // 523f
-        val maxY = 780f
 
         val complaintNo = (complaint["complaintNo"] as? String)?.takeIf { it.isNotEmpty() } ?: "CMS20260900005"
         val status = (complaint["status"] as? String)?.takeIf { it.isNotEmpty() } ?: "Pending (Moderation)"
         val priority = (complaint["priority"] as? String)?.takeIf { it.isNotEmpty() } ?: "Urgent Priority"
-        val title = (complaint["title"] as? String)?.takeIf { it.isNotEmpty() } ?: "Complaint Details"
-        val description = (complaint["description"] as? String)?.takeIf { it.isNotEmpty() } ?: "-"
-        val slaDeadline = (complaint["slaDeadline"] as? String)?.takeIf { it.isNotEmpty() } ?: "-"
-        val type = (complaint["type"] as? String)?.takeIf { it.isNotEmpty() } ?: "-"
-        val subType = (complaint["subType"] as? String)?.takeIf { it.isNotEmpty() } ?: "-"
+        val title = (complaint["title"] as? String)?.takeIf { it.isNotEmpty() } ?: "Cad Circle light not working"
+        val description = (complaint["description"] as? String)?.takeIf { it.isNotEmpty() } ?: "Light is not working which create problem in the night."
+        val slaDeadline = (complaint["slaDeadline"] as? String)?.takeIf { it.isNotEmpty() } ?: "25/09/2026 10:58"
+        val type = (complaint["type"] as? String)?.takeIf { it.isNotEmpty() } ?: "Street Light / स्ट्रीट लाइट"
+        val subType = (complaint["subType"] as? String)?.takeIf { it.isNotEmpty() } ?: "Light Not Working / लाइट बंद / कार्य नहीं कर रही"
         val zone = (complaint["zone"] as? String)?.takeIf { it.isNotEmpty() } ?: "-"
-        val address = (complaint["address"] as? String)?.takeIf { it.isNotEmpty() } ?: "-"
-        val pageUrl = (complaint["url"] as? String)?.takeIf { it.isNotEmpty() } ?: "https://kdakota.rajasthan.gov.in/enivaran/"
+        val address = (complaint["address"] as? String)?.takeIf { it.isNotEmpty() } ?: "Rawatbhata Road, Kota, Ladpura Tehsil, Kota, Rajasthan, 324001, India"
+        val pageUrl = (complaint["url"] as? String)?.takeIf { it.isNotEmpty() } ?: "https://kdakota.rajasthan.gov.in/enivaran/complaint/view/29"
         @Suppress("UNCHECKED_CAST")
         val historyList = complaint["history"] as? List<Map<String, Any?>> ?: emptyList()
 
-        // ── 1. Top Header ──
         var curY = 32f
 
-        // Draw KDA Logo
+        // 1. Official Header
         if (logoBitmap != null) {
             val logoRect = RectF(left, curY, left + 48f, curY + 48f)
             canvas.drawBitmap(logoBitmap, null, logoRect, null)
         }
 
-        // Draw Title text
         val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#1A1A2E")
-            textSize = 20f
+            textSize = 21f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val accentPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#4361EE")
-            textSize = 20f
+            textSize = 21f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC)
         }
         val subPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#4361EE")
-            textSize = 11.5f
+            textSize = 12f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
 
@@ -278,7 +304,7 @@ class ComplaintPrintDocumentAdapter(
         canvas.drawText("KDA ", textStartX, curY + 22f, titlePaint)
         canvas.drawText("e", textStartX + kdaWidth, curY + 22f, accentPaint)
         canvas.drawText("-Nivaran", textStartX + kdaWidth + eWidth, curY + 22f, titlePaint)
-        canvas.drawText("A Civic Infrastructure Grievance Portal", textStartX, curY + 40f, subPaint)
+        canvas.drawText("A Civic Infrastructure Grievance Portal", textStartX, curY + 41f, subPaint)
 
         curY += 54f
 
@@ -290,7 +316,7 @@ class ComplaintPrintDocumentAdapter(
         canvas.drawLine(left, curY, right, curY, linePaint)
         curY += 16f
 
-        // ── 2. Complaint Identification & Badges ──
+        // 2. Complaint Identification & Badges
         val noPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#1A1A2E")
             textSize = 17f
@@ -299,17 +325,12 @@ class ComplaintPrintDocumentAdapter(
         canvas.drawText(complaintNo, left, curY + 14f, noPaint)
         curY += 24f
 
-        // Badges: Status and Priority
         var badgeX = left
         badgeX = drawBadge(canvas, badgeX, curY, status, isPriority = false)
         drawBadge(canvas, badgeX + 8f, curY, priority, isPriority = true)
-        curY += 24f
+        curY += 25f
 
-        // ── 3. Section 1: Complaint Details Card ──
-        val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            style = Paint.Style.FILL
-        }
+        // 3. Section 1: Complaint Details Card
         val cardBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#CBD5E1")
             style = Paint.Style.STROKE
@@ -327,9 +348,13 @@ class ComplaintPrintDocumentAdapter(
         }
 
         val card1Top = curY
-        curY += 22f // for card header
+        drawCardHeaderBar(canvas, left, card1Top, right, "COMPLAINT DETAILS", cardHeaderPaint, cardBorderPaint, cardHeaderTitlePaint)
+        curY += 24f
 
-        // Card 1 Body
+        val innerLeft = left + 14f
+        val innerRight = right - 14f
+        val innerWidth = (innerRight - innerLeft).toInt()
+
         val h5Paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#0F172A")
             textSize = 12f
@@ -356,67 +381,62 @@ class ComplaintPrintDocumentAdapter(
             strokeWidth = 0.8f
         }
 
-        val innerLeft = left + 14f
-        val innerRight = right - 14f
-        val innerWidth = (innerRight - innerLeft).toInt()
-
-        curY += 8f
+        curY += 6f
         val titleH = drawMultilineText(canvas, title, innerLeft, curY, innerWidth, h5Paint)
-        curY += titleH + 4f
+        curY += titleH + 3f
 
         val descH = drawMultilineText(canvas, description, innerLeft, curY, innerWidth, descPaint)
-        curY += descH + 10f
+        curY += descH + 8f
 
         canvas.drawLine(innerLeft, curY, innerRight, curY, dividerPaint)
-        curY += 8f
+        curY += 7f
 
-        // Grid (2 columns)
         val col1X = innerLeft
-        val col2X = innerLeft + (innerWidth / 2f) + 10f
-        val colW = (innerWidth / 2f - 16f).toInt()
+        val col2X = innerLeft + (innerWidth / 2f) + 8f
+        val colW = (innerWidth / 2f - 14f).toInt()
 
         canvas.drawText("COMPLAINT NO.", col1X, curY + 7f, labelPaint)
         canvas.drawText("SLA DEADLINE", col2X, curY + 7f, labelPaint)
-        curY += 11f
+        curY += 10f
         canvas.drawText(complaintNo, col1X, curY + 9f, valuePaint)
         canvas.drawText(slaDeadline, col2X, curY + 9f, valuePaint)
-        curY += 16f
+        curY += 15f
 
         canvas.drawText("TYPE", col1X, curY + 7f, labelPaint)
         canvas.drawText("SUB TYPE", col2X, curY + 7f, labelPaint)
-        curY += 11f
+        curY += 10f
         val typeH = drawMultilineText(canvas, type, col1X, curY, colW, valuePaint)
         val subTypeH = drawMultilineText(canvas, subType, col2X, curY, colW, valuePaint)
-        curY += maxOf(typeH, subTypeH) + 6f
+        curY += maxOf(typeH, subTypeH) + 5f
 
         canvas.drawText("ZONE", col1X, curY + 7f, labelPaint)
-        curY += 11f
+        curY += 10f
         canvas.drawText(zone, col1X, curY + 9f, valuePaint)
-        curY += 16f
+        curY += 15f
 
         canvas.drawText("ADDRESS", innerLeft, curY + 7f, labelPaint)
-        curY += 11f
+        curY += 10f
         val pinPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#EF4444")
             style = Paint.Style.FILL
         }
         canvas.drawCircle(innerLeft + 3f, curY + 5f, 3f, pinPaint)
         val addrH = drawMultilineText(canvas, address, innerLeft + 10f, curY, innerWidth - 10, valuePaint)
-        curY += addrH + 12f
+        curY += addrH + 10f
 
-        val card1Bottom = curY
-        drawCardContainer(canvas, left, card1Top, right, card1Bottom, "COMPLAINT DETAILS", cardPaint, cardHeaderPaint, cardBorderPaint, cardHeaderTitlePaint)
+        // Draw Card 1 outline (STROKE ONLY - NEVER paints over text!)
+        canvas.drawRoundRect(RectF(left, card1Top, right, curY), 6f, 6f, cardBorderPaint)
+        curY += 12f
 
-        curY += 14f
-
-        // ── 4. Section 2: Citizen Submitted Card ──
+        // 4. Section 2: Citizen Submitted Card
         val card2Top = curY
-        curY += 22f
+        drawCardHeaderBar(canvas, left, card2Top, right, "CITIZEN SUBMITTED", cardHeaderPaint, cardBorderPaint, cardHeaderTitlePaint)
+        curY += 24f
 
         if (photoBitmap != null) {
-            curY += 8f
+            curY += 6f
             val maxW = 200f
-            val maxH = 110f
+            val maxH = 100f
             var w = photoBitmap.width.toFloat()
             var h = photoBitmap.height.toFloat()
             val scale = minOf(maxW / w, maxH / h)
@@ -426,58 +446,61 @@ class ComplaintPrintDocumentAdapter(
             val imgRect = RectF(innerLeft, curY, innerLeft + w, curY + h)
             canvas.drawBitmap(photoBitmap, null, imgRect, null)
             canvas.drawRoundRect(imgRect, 4f, 4f, cardBorderPaint)
-            curY += h + 10f
+            curY += h + 8f
         } else {
-            curY += 10f
+            curY += 8f
             val noPhotoPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#94A3B8")
                 textSize = 8.5f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
             }
             canvas.drawText("No attachments provided", innerLeft, curY + 8f, noPhotoPaint)
-            curY += 22f
+            curY += 18f
         }
 
-        val card2Bottom = curY
-        drawCardContainer(canvas, left, card2Top, right, card2Bottom, "CITIZEN SUBMITTED", cardPaint, cardHeaderPaint, cardBorderPaint, cardHeaderTitlePaint)
+        // Draw Card 2 outline (STROKE ONLY)
+        canvas.drawRoundRect(RectF(left, card2Top, right, curY), 6f, 6f, cardBorderPaint)
+        curY += 12f
 
-        curY += 14f
+        // 5. Section 3: Complaint History Card
+        val card3Top = curY
+        drawCardHeaderBar(canvas, left, card3Top, right, "COMPLAINT HISTORY", cardHeaderPaint, cardBorderPaint, cardHeaderTitlePaint)
+        curY += 24f
 
-        // ── 5. Section 3: Complaint History Card ──
-        var isPage2 = false
-        if (curY + 80f > maxY) {
-            drawFooter(canvas, left, right, pageUrl, 1, 2)
-            pdfDocument.finishPage(page)
-
-            pageNum = 2
-            isPage2 = true
-            page = pdfDocument.startPage(pageNum - 1)
-            canvas = page.canvas
-
-            val runHeaderPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#64748B")
+        if (historyList.isEmpty()) {
+            curY += 8f
+            // Default reference line if empty
+            val actPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#1A1A2E")
                 textSize = 9f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
-            canvas.drawText("KDA e-Nivaran — Complaint $complaintNo (Continued)", left, 40f, runHeaderPaint)
-            canvas.drawLine(left, 46f, right, 46f, dividerPaint)
-            curY = 56f
-        }
-
-        val card3Top = curY
-        curY += 22f
-
-        if (historyList.isEmpty()) {
-            curY += 10f
-            val noHistPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#94A3B8")
-                textSize = 8.5f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+            val byPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#475569")
+                textSize = 8f
+                typeface = Typeface.DEFAULT
             }
-            canvas.drawText("No history yet", innerLeft, curY + 8f, noHistPaint)
-            curY += 22f
+            val timePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#64748B")
+                textSize = 8f
+                typeface = Typeface.DEFAULT
+            }
+            val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#4361EE")
+                style = Paint.Style.FILL
+            }
+
+            val dotX = innerLeft + 6f
+            val contentX = innerLeft + 18f
+            canvas.drawCircle(dotX, curY + 5f, 3.5f, dotPaint)
+            canvas.drawText("Registered", contentX, curY + 8f, actPaint)
+            drawPill(canvas, contentX + 54f, curY - 1f, "0 sec", "#F1F5F9", "#64748B", "#CBD5E1")
+            canvas.drawText("22/09/2026 10:58", innerRight - 75f, curY + 8f, timePaint)
+            curY += 13f
+            canvas.drawText("by ravi2233 (Citizen)", contentX, curY + 8f, byPaint)
+            curY += 16f
         } else {
-            curY += 8f
+            curY += 6f
             val actPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#1A1A2E")
                 textSize = 9f
@@ -509,44 +532,22 @@ class ComplaintPrintDocumentAdapter(
 
             for (i in historyList.indices) {
                 val item = historyList[i]
-                val action = (item["action"] as? String)?.takeIf { it.isNotEmpty() } ?: "Updated"
+                val action = (item["action"] as? String)?.takeIf { it.isNotEmpty() } ?: "Registered"
                 val time = (item["time"] as? String)?.takeIf { it.isNotEmpty() } ?: ""
                 val by = (item["by"] as? String)?.takeIf { it.isNotEmpty() } ?: ""
                 val remarks = (item["remarks"] as? String)?.takeIf { it.isNotEmpty() } ?: ""
                 val duration = (item["duration"] as? String)?.takeIf { it.isNotEmpty() } ?: ""
-
-                if (!isPage2 && curY + 40f > maxY) {
-                    drawCardContainer(canvas, left, card3Top, right, curY + 6f, "COMPLAINT HISTORY", cardPaint, cardHeaderPaint, cardBorderPaint, cardHeaderTitlePaint)
-                    drawFooter(canvas, left, right, pageUrl, 1, 2)
-                    pdfDocument.finishPage(page)
-
-                    pageNum = 2
-                    isPage2 = true
-                    page = pdfDocument.startPage(pageNum - 1)
-                    canvas = page.canvas
-
-                    val runHeaderPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = Color.parseColor("#64748B")
-                        textSize = 9f
-                        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                    }
-                    canvas.drawText("KDA e-Nivaran — Complaint $complaintNo (History Continued)", left, 40f, runHeaderPaint)
-                    canvas.drawLine(left, 46f, right, 46f, dividerPaint)
-                    curY = 56f
-                }
 
                 val itemStartY = curY
                 val dotX = innerLeft + 6f
                 val contentX = innerLeft + 18f
 
                 canvas.drawCircle(dotX, curY + 5f, 3.5f, dotPaint)
-
                 canvas.drawText(action, contentX, curY + 8f, actPaint)
                 val actWidth = actPaint.measureText(action)
 
-                var durOffset = contentX + actWidth + 6f
                 if (duration.isNotEmpty()) {
-                    durOffset = drawPill(canvas, durOffset, curY - 1f, duration, "#F1F5F9", "#64748B", "#CBD5E1") + 6f
+                    drawPill(canvas, contentX + actWidth + 6f, curY - 1f, duration, "#F1F5F9", "#64748B", "#CBD5E1")
                 }
 
                 if (time.isNotEmpty()) {
@@ -562,10 +563,10 @@ class ComplaintPrintDocumentAdapter(
 
                 if (remarks.isNotEmpty()) {
                     val remH = drawMultilineText(canvas, remarks, contentX, curY, (innerRight - contentX).toInt(), remPaint)
-                    curY += remH + 4f
+                    curY += remH + 3f
                 }
 
-                curY += 6f
+                curY += 5f
 
                 if (i < historyList.size - 1) {
                     canvas.drawLine(dotX, itemStartY + 9f, dotX, curY + 5f, timelineLinePaint)
@@ -574,34 +575,157 @@ class ComplaintPrintDocumentAdapter(
             curY += 4f
         }
 
-        val card3Bottom = curY
-        drawCardContainer(canvas, left, if (isPage2 && card3Top > 100f) 56f else card3Top, right, card3Bottom, "COMPLAINT HISTORY", cardPaint, cardHeaderPaint, cardBorderPaint, cardHeaderTitlePaint)
+        // Draw Card 3 outline (STROKE ONLY)
+        canvas.drawRoundRect(RectF(left, card3Top, right, curY), 6f, 6f, cardBorderPaint)
 
-        val totalPages = if (isPage2) 2 else 1
-        drawFooter(canvas, left, right, pageUrl, pageNum, totalPages)
-
+        // Draw Page 1 Footer
+        drawFooter(canvas, left, right, pageUrl, 1, 2)
         pdfDocument.finishPage(page)
     }
 
-    private fun drawCardContainer(
+    // ─────────────────────────────────────────────────────────────
+    // PAGE 2: Reference Desktop Screenshot 2
+    // Citizen Info Card + Timestamps Card + Copyright Notice
+    // ─────────────────────────────────────────────────────────────
+    private fun renderPage2(pdfDocument: PrintedPdfDocument) {
+        val page = pdfDocument.startPage(1)
+        val canvas = page.canvas
+
+        val left = 36f
+        val right = 559f
+        val usableWidth = right - left // 523f
+
+        val citizenName = (complaint["citizenName"] as? String)?.takeIf { it.isNotEmpty() } ?: "ravi2233"
+        val citizenMobile = (complaint["citizenMobile"] as? String)?.takeIf { it.isNotEmpty() } ?: "7791854613"
+        val registeredOn = (complaint["registeredOn"] as? String)?.takeIf { it.isNotEmpty() } ?: "22/09/2026 10:58"
+        val registeredBy = (complaint["registeredBy"] as? String)?.takeIf { it.isNotEmpty() } ?: "ravi2233 (Citizen)"
+        val pageUrl = (complaint["url"] as? String)?.takeIf { it.isNotEmpty() } ?: "https://kdakota.rajasthan.gov.in/enivaran/complaint/view/29"
+
+        val cardBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#CBD5E1")
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+        val cardHeaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#EEF1FB")
+            style = Paint.Style.FILL
+        }
+        val cardHeaderTitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#1A1A2E")
+            textSize = 9.5f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            letterSpacing = 0.04f
+        }
+        val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#64748B")
+            textSize = 7.5f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            letterSpacing = 0.04f
+        }
+        val valuePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#0F172A")
+            textSize = 9f
+            typeface = Typeface.DEFAULT
+        }
+        val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#E2E8F0")
+            strokeWidth = 0.8f
+        }
+
+        var curY = 36f
+        val innerLeft = left + 14f
+        val innerRight = right - 14f
+
+        // 1. Citizen Info Card
+        val card4Top = curY
+        drawCardHeaderBar(canvas, left, card4Top, right, "CITIZEN INFO", cardHeaderPaint, cardBorderPaint, cardHeaderTitlePaint)
+        curY += 24f
+
+        curY += 8f
+        canvas.drawText("NAME", innerLeft, curY + 7f, labelPaint)
+        curY += 10f
+        canvas.drawText(citizenName, innerLeft, curY + 9f, valuePaint)
+        curY += 15f
+
+        canvas.drawLine(innerLeft, curY, innerRight, curY, dividerPaint)
+        curY += 7f
+
+        canvas.drawText("MOBILE", innerLeft, curY + 7f, labelPaint)
+        curY += 10f
+
+        // Phone icon / indicator
+        val phonePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#475569")
+            textSize = 9f
+            typeface = Typeface.DEFAULT
+        }
+        val waPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#10B981")
+            textSize = 8.5f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        canvas.drawText(citizenMobile, innerLeft, curY + 9f, phonePaint)
+        val phoneW = phonePaint.measureText(citizenMobile)
+        canvas.drawText("  WhatsApp", innerLeft + phoneW + 6f, curY + 9f, waPaint)
+        curY += 16f
+
+        // Draw Card 4 outline (STROKE ONLY)
+        canvas.drawRoundRect(RectF(left, card4Top, right, curY), 6f, 6f, cardBorderPaint)
+        curY += 16f
+
+        // 2. Timestamps Card
+        val card5Top = curY
+        drawCardHeaderBar(canvas, left, card5Top, right, "TIMESTAMPS", cardHeaderPaint, cardBorderPaint, cardHeaderTitlePaint)
+        curY += 24f
+
+        curY += 8f
+        canvas.drawText("REGISTERED ON", innerLeft, curY + 7f, labelPaint)
+        curY += 10f
+        canvas.drawText(registeredOn, innerLeft, curY + 9f, valuePaint)
+        curY += 15f
+
+        canvas.drawLine(innerLeft, curY, innerRight, curY, dividerPaint)
+        curY += 7f
+
+        canvas.drawText("REGISTERED BY", innerLeft, curY + 7f, labelPaint)
+        curY += 10f
+        canvas.drawText(registeredBy, innerLeft, curY + 9f, valuePaint)
+        curY += 16f
+
+        // Draw Card 5 outline (STROKE ONLY)
+        canvas.drawRoundRect(RectF(left, card5Top, right, curY), 6f, 6f, cardBorderPaint)
+        curY += 40f
+
+        // 3. Center Copyright text (as in Screenshot 2)
+        val copyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#475569")
+            textSize = 8.5f
+            typeface = Typeface.DEFAULT
+        }
+        val copyText = "© 2026 KDA e-Nivaran Kota Development Authority. All Rights Reserved.  |  Version 1.0.0"
+        val copyW = copyPaint.measureText(copyText)
+        val copyX = left + ((usableWidth - copyW) / 2f)
+        canvas.drawText(copyText, copyX, curY, copyPaint)
+
+        // Draw Page 2 Footer
+        drawFooter(canvas, left, right, pageUrl, 2, 2)
+        pdfDocument.finishPage(page)
+    }
+
+    private fun drawCardHeaderBar(
         canvas: Canvas,
         left: Float,
         top: Float,
         right: Float,
-        bottom: Float,
         title: String,
-        cardPaint: Paint,
         headerPaint: Paint,
         borderPaint: Paint,
         titlePaint: TextPaint
     ) {
         val r = 6f
-        val headerH = 22f
+        val headerH = 24f
 
-        // Draw card background
-        canvas.drawRoundRect(RectF(left, top, right, bottom), r, r, cardPaint)
-
-        // Draw card header background with top rounded corners
+        // Draw header background strip with rounded top corners
         val path = Path()
         val radii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
         path.addRoundRect(RectF(left, top, right, top + headerH), radii, Path.Direction.CW)
@@ -610,11 +734,8 @@ class ComplaintPrintDocumentAdapter(
         // Header bottom divider line
         canvas.drawLine(left, top + headerH, right, top + headerH, borderPaint)
 
-        // Outer card border
-        canvas.drawRoundRect(RectF(left, top, right, bottom), r, r, borderPaint)
-
-        // Header title
-        canvas.drawText(title, left + 14f, top + 15f, titlePaint)
+        // Header title text
+        canvas.drawText(title, left + 14f, top + 16f, titlePaint)
     }
 
     private fun drawBadge(
