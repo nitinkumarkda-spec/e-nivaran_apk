@@ -3,6 +3,7 @@ package `in`.gov.rajasthan.kdakota.enivaran.department
 import android.content.Context
 import android.print.PrintAttributes
 import android.print.PrintManager
+import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import io.flutter.embedding.android.FlutterActivity
@@ -11,6 +12,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "in.gov.rajasthan.kdakota.enivaran/print"
+    private var activePrintWebView: WebView? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -36,6 +38,12 @@ class MainActivity: FlutterActivity() {
     private fun printHtmlContent(html: String, baseUrl: String, title: String) {
         runOnUiThread {
             val printWebView = WebView(this)
+            activePrintWebView = printWebView
+
+            val cookieManager = CookieManager.getInstance()
+            cookieManager.setAcceptCookie(true)
+            cookieManager.setAcceptThirdPartyCookies(printWebView, true)
+
             printWebView.settings.javaScriptEnabled = true
             printWebView.settings.domStorageEnabled = true
             printWebView.settings.loadWithOverviewMode = true

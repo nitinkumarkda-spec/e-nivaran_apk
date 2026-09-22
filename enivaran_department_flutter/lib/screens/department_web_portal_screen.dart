@@ -110,18 +110,127 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
 
   void _injectPortalModifications() {
     // Injected script handles:
-    // 1. Native Android Print interception for window.print()
+    // 1. Native Android Print interception for window.print() and print buttons
     // 2. Completely removing 'Go to Citizen', 'Citizen Login', and 'Install App'
     // 3. Ensuring Dark Mode cards and Light Mode cards are razor-sharp with proper contrast
     // 4. Ensuring Status Chart has an elegant Empty State if count is 0
     _controller.runJavaScript(r"""
       (function() {
         // ── Window.print Interception for Native Android Print Spooler ──
-        window.print = function() {
+        function triggerNativePrint() {
           if (window.FlutterPrintChannel) {
             try {
+              // Clone document to prepare clean print view
+              var docClone = document.documentElement.cloneNode(true);
+
+              // Force light theme on cloned document for crisp white printout
+              docClone.setAttribute('data-theme', 'light');
+
+              // Remove screen-only elements that must not appear in print
+              var toRemove = docClone.querySelectorAll(
+                'nav, .navbar, .sidebar, .breadcrumb, .btn, .modal, .file-drop, a.link-primary, .section-header .d-flex.flex-wrap.gap-3, #installPwaBtn, .install-app-btn, .install-banner'
+              );
+              for (var k = 0; k < toRemove.length; k++) {
+                toRemove[k].remove();
+              }
+
+              // Inject high-precision print styles matching government document format
+              var printStyle = document.createElement('style');
+              printStyle.id = 'kda-native-print-override';
+              printStyle.textContent = `
+                @media print, all {
+                  body {
+                    background: #ffffff !important;
+                    color: #1a1a2e !important;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+                    font-size: 13px !important;
+                    line-height: 1.5 !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                  }
+                  .print-header {
+                    display: flex !important;
+                    align-items: center !important;
+                    gap: 16px !important;
+                    background: #ffffff !important;
+                    border-bottom: 3px solid #1e293b !important;
+                    padding: 10px 0 16px 0 !important;
+                    margin-bottom: 20px !important;
+                  }
+                  .print-header-logo {
+                    height: 80px !important;
+                    width: auto !important;
+                    display: block !important;
+                  }
+                  .print-header-title {
+                    font-size: 26px !important;
+                    font-weight: 800 !important;
+                    color: #1a1a2e !important;
+                    line-height: 1.1 !important;
+                  }
+                  .print-header-title-accent {
+                    color: #4361ee !important;
+                    font-style: italic !important;
+                  }
+                  .print-header-subtitle {
+                    font-size: 16px !important;
+                    font-weight: 600 !important;
+                    color: #475569 !important;
+                    margin-top: 4px !important;
+                  }
+                  .page-title, h1, h2, h3, h4 {
+                    color: #0f172a !important;
+                  }
+                  .card {
+                    background: #ffffff !important;
+                    color: #0f172a !important;
+                    border: 1px solid #cbd5e1 !important;
+                    border-radius: 8px !important;
+                    box-shadow: none !important;
+                    margin-bottom: 18px !important;
+                    page-break-inside: avoid !important;
+                  }
+                  .card-header {
+                    background: #f8fafc !important;
+                    color: #0f172a !important;
+                    font-weight: 700 !important;
+                    border-bottom: 1px solid #cbd5e1 !important;
+                    padding: 10px 16px !important;
+                  }
+                  .card-body {
+                    background: #ffffff !important;
+                    color: #0f172a !important;
+                    padding: 16px !important;
+                  }
+                  .row.g-4, .row {
+                    display: block !important;
+                    margin: 0 !important;
+                  }
+                  .col-lg-8, .col-lg-4, .col-md-6, .col-12 {
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    flex: 0 0 100% !important;
+                    padding: 0 !important;
+                  }
+                  .badge {
+                    border: 1px solid #94a3b8 !important;
+                    color: #0f172a !important;
+                    font-weight: 600 !important;
+                    padding: 4px 8px !important;
+                  }
+                  img {
+                    max-width: 100% !important;
+                    height: auto !important;
+                  }
+                }
+              `;
+              var head = docClone.querySelector('head');
+              if (head) {
+                head.appendChild(printStyle);
+              }
+
               window.FlutterPrintChannel.postMessage(JSON.stringify({
-                html: document.documentElement.outerHTML,
+                html: docClone.outerHTML,
                 url: window.location.href,
                 title: document.title || 'KDA-Complaint-Print'
               }));
@@ -129,22 +238,23 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
               console.error('Print channel error:', err);
             }
           }
-        };
+        }
+
+        window.print = triggerNativePrint;
 
         // Attach delegated listener on all print buttons and links
         document.addEventListener('click', function(e) {
           var btn = e.target.closest('button, a');
           if (btn) {
-            var onclickAttr = btn.getAttribute('onclick') || '';
+            var onclickAttr = (btn.getAttribute('onclick') || '').toLowerCase();
             var txt = (btn.textContent || '').toLowerCase();
             if (onclickAttr.indexOf('print') !== -1 || txt.indexOf('print') !== -1 || btn.querySelector('.fa-print')) {
               e.preventDefault();
               e.stopPropagation();
-              window.print();
+              triggerNativePrint();
             }
           }
         }, true);
-
         // 1. Hide Citizen Login and Install App items
         var citizenElements = document.querySelectorAll(
           'a[href*="/auth/login"]:not([href*="department"]), ' +
