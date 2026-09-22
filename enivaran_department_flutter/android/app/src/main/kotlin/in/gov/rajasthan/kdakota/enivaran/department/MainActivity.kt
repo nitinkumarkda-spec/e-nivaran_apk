@@ -3,6 +3,8 @@ package `in`.gov.rajasthan.kdakota.enivaran.department
 import android.content.Context
 import android.print.PrintAttributes
 import android.print.PrintManager
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -18,16 +20,13 @@ class MainActivity: FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "printHtml") {
-                val html = call.argument<String>("html")
-                val baseUrl = call.argument<String>("baseUrl") ?: "https://kdakota.rajasthan.gov.in/enivaran/"
+            if (call.method == "print") {
                 val title = call.argument<String>("title") ?: "KDA-Complaint-Print"
+                val url = call.argument<String>("url") ?: "https://kdakota.rajasthan.gov.in/enivaran/"
 
-                if (html != null) {
-                    printHtmlContent(html, baseUrl, title)
+                runOnUiThread {
+                    startPrintJob(title, url)
                     result.success(true)
-                } else {
-                    result.error("INVALID_ARGUMENT", "HTML content is null", null)
                 }
             } else {
                 result.notImplemented()
@@ -35,42 +34,62 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    private fun printHtmlContent(html: String, baseUrl: String, title: String) {
-        runOnUiThread {
-            val printWebView = WebView(this)
-            activePrintWebView = printWebView
+    private fun findWebView(root: View?): WebView? {
+        if (root == null) return null
+        if (root is WebView) return root
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                val child = findWebView(root.getChildAt(i))
+                if (child != null) return child
+            }
+        }
+        return null
+    }
 
-            val cookieManager = CookieManager.getInstance()
-            cookieManager.setAcceptCookie(true)
-            cookieManager.setAcceptThirdPartyCookies(printWebView, true)
+    private fun startPrintJob(rawTitle: String, url: String) {
+        val jobName = rawTitle.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(50).ifEmpty { "KDA-Complaint" }
+        val printManager = getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return
 
-            printWebView.settings.javaScriptEnabled = true
-            printWebView.settings.domStorageEnabled = true
-            printWebView.settings.loadWithOverviewMode = true
-            printWebView.settings.useWideViewPort = true
+        val printAttributes = PrintAttributes.Builder()
+            .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+            .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
+            .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+            .build()
 
-            printWebView.webViewClient = object : WebViewClient() {
-                private var hasPrinted = false
-                override fun onPageFinished(view: WebView, url: String) {
-                    if (!hasPrinted) {
-                        hasPrinted = true
-                        view.postDelayed({
-                            val printManager = getSystemService(Context.PRINT_SERVICE) as? PrintManager
-                            if (printManager != null) {
-                                val printAdapter = view.createPrintDocumentAdapter(title)
-                                val printAttributes = PrintAttributes.Builder()
-                                    .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
-                                    .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-                                    .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
-                                    .build()
-                                printManager.print(title, printAdapter, printAttributes)
-                            }
-                        }, 500)
-                    }
+        // 1. Primary: Print directly from the live on-screen WebView (instant & 100% rendered)
+        val onScreenWebView = findWebView(window.decorView)
+        if (onScreenWebView != null) {
+            val printAdapter = onScreenWebView.createPrintDocumentAdapter(jobName)
+            printManager.print(jobName, printAdapter, printAttributes)
+            return
+        }
+
+        // 2. Fallback: dedicated off-screen webview
+        val printWebView = WebView(this)
+        activePrintWebView = printWebView
+
+        val cookieManager = CookieManager.getInstance()
+        cookieManager.setAcceptCookie(true)
+        cookieManager.setAcceptThirdPartyCookies(printWebView, true)
+
+        printWebView.settings.javaScriptEnabled = true
+        printWebView.settings.domStorageEnabled = true
+        printWebView.settings.loadWithOverviewMode = true
+        printWebView.settings.useWideViewPort = true
+
+        printWebView.webViewClient = object : WebViewClient() {
+            private var hasPrinted = false
+            override fun onPageFinished(view: WebView, loadedUrl: String) {
+                if (!hasPrinted) {
+                    hasPrinted = true
+                    view.postDelayed({
+                        val printAdapter = view.createPrintDocumentAdapter(jobName)
+                        printManager.print(jobName, printAdapter, printAttributes)
+                    }, 400)
                 }
             }
-
-            printWebView.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
         }
+
+        printWebView.loadUrl(url)
     }
 }

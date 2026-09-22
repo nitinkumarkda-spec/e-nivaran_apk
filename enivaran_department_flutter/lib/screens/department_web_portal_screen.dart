@@ -94,13 +94,11 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
   void _handlePrintMessage(String payload) async {
     try {
       final data = jsonDecode(payload) as Map<String, dynamic>;
-      final html = data['html'] as String? ?? '';
       final title = data['title'] as String? ?? 'KDA-Complaint-Print';
       final url = data['url'] as String? ?? ApiConfig.baseUrl;
 
-      await _printChannel.invokeMethod('printHtml', {
-        'html': html,
-        'baseUrl': url,
+      await _printChannel.invokeMethod('print', {
+        'url': url,
         'title': title,
       });
     } catch (e) {
@@ -118,35 +116,20 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
       (function() {
         // ── Window.print Interception for Native Android Print Spooler ──
         function triggerNativePrint() {
-          if (window.FlutterPrintChannel) {
-            try {
-              // Clone document to prepare clean print view
-              var docClone = document.documentElement.cloneNode(true);
-
-              // Force light theme on cloned document for crisp white printout
-              docClone.setAttribute('data-theme', 'light');
-
-              // Remove screen-only elements that must not appear in print
-              var toRemove = docClone.querySelectorAll(
-                'nav, .navbar, .sidebar, .breadcrumb, .btn, .modal, .file-drop, a.link-primary, .section-header .d-flex.flex-wrap.gap-3, #installPwaBtn, .install-app-btn, .install-banner'
-              );
-              for (var k = 0; k < toRemove.length; k++) {
-                toRemove[k].remove();
-              }
-
-              // Inject high-precision print styles matching government document format
-              var printStyle = document.createElement('style');
-              printStyle.id = 'kda-native-print-override';
-              printStyle.textContent = `
-                @media print, all {
+          try {
+            // Ensure print styles are injected directly into document head
+            var styleEl = document.getElementById('kda-native-print-override');
+            if (!styleEl) {
+              styleEl = document.createElement('style');
+              styleEl.id = 'kda-native-print-override';
+              styleEl.textContent = `
+                @media print {
                   body {
                     background: #ffffff !important;
                     color: #1a1a2e !important;
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
                     font-size: 13px !important;
                     line-height: 1.5 !important;
-                    padding: 0 !important;
-                    margin: 0 !important;
                   }
                   .print-header {
                     display: flex !important;
@@ -178,8 +161,18 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
                     color: #475569 !important;
                     margin-top: 4px !important;
                   }
-                  .page-title, h1, h2, h3, h4 {
-                    color: #0f172a !important;
+                  .breadcrumb, .btn, .modal, nav, .sidebar, .navbar, .file-drop, a.link-primary, .section-header .d-flex.flex-wrap.gap-3, #installPwaBtn, .install-app-btn, .install-banner {
+                    display: none !important;
+                  }
+                  .row.g-4, .row {
+                    display: block !important;
+                    margin: 0 !important;
+                  }
+                  .col-lg-8, .col-lg-4, .col-md-6, .col-12 {
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    flex: 0 0 100% !important;
+                    padding: 0 !important;
                   }
                   .card {
                     background: #ffffff !important;
@@ -202,16 +195,6 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
                     color: #0f172a !important;
                     padding: 16px !important;
                   }
-                  .row.g-4, .row {
-                    display: block !important;
-                    margin: 0 !important;
-                  }
-                  .col-lg-8, .col-lg-4, .col-md-6, .col-12 {
-                    width: 100% !important;
-                    max-width: 100% !important;
-                    flex: 0 0 100% !important;
-                    padding: 0 !important;
-                  }
                   .badge {
                     border: 1px solid #94a3b8 !important;
                     color: #0f172a !important;
@@ -224,19 +207,24 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
                   }
                 }
               `;
-              var head = docClone.querySelector('head');
-              if (head) {
-                head.appendChild(printStyle);
-              }
-
-              window.FlutterPrintChannel.postMessage(JSON.stringify({
-                html: docClone.outerHTML,
-                url: window.location.href,
-                title: document.title || 'KDA-Complaint-Print'
-              }));
-            } catch (err) {
-              console.error('Print channel error:', err);
+              document.head.appendChild(styleEl);
             }
+
+            var title = 'KDA-Complaint-Print';
+            var headerEl = document.querySelector('h1, h2, h3, .page-title, .print-header-title');
+            if (headerEl && headerEl.textContent.trim()) {
+              title = headerEl.textContent.trim();
+            }
+
+            if (window.FlutterPrintChannel) {
+              window.FlutterPrintChannel.postMessage(JSON.stringify({
+                action: 'print',
+                title: title,
+                url: window.location.href
+              }));
+            }
+          } catch (err) {
+            console.error('Print channel error:', err);
           }
         }
 
@@ -244,11 +232,12 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
 
         // Attach delegated listener on all print buttons and links
         document.addEventListener('click', function(e) {
-          var btn = e.target.closest('button, a');
+          var btn = e.target.closest('button, a, .btn');
           if (btn) {
             var onclickAttr = (btn.getAttribute('onclick') || '').toLowerCase();
             var txt = (btn.textContent || '').toLowerCase();
-            if (onclickAttr.indexOf('print') !== -1 || txt.indexOf('print') !== -1 || btn.querySelector('.fa-print')) {
+            var hasPrintIcon = btn.querySelector('.fa-print, .fas.fa-print, [class*="print"]');
+            if (onclickAttr.indexOf('print') !== -1 || txt.indexOf('print') !== -1 || hasPrintIcon) {
               e.preventDefault();
               e.stopPropagation();
               triggerNativePrint();
