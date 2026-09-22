@@ -36,6 +36,8 @@ import kotlin.concurrent.thread
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "in.gov.rajasthan.kdakota.enivaran/print"
+    @Volatile
+    private var lastComplaintPrintTime = 0L
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -60,6 +62,11 @@ class MainActivity: FlutterActivity() {
     }
 
     private fun startComplaintPrintJob(complaintData: Map<String, Any?>) {
+        val now = System.currentTimeMillis()
+        if (now - lastComplaintPrintTime < 3000L) {
+            return
+        }
+        lastComplaintPrintTime = now
         thread {
             // 1. Load official logo bitmap from Flutter assets
             var logoBitmap: Bitmap? = null

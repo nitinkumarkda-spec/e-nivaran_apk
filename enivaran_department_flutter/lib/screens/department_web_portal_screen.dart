@@ -90,7 +90,17 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
       ..loadRequest(Uri.parse(targetUrl));
   }
 
+  DateTime? _lastPrintInvocationTime;
+
   void _handlePrintMessage(String payload) async {
+    final now = DateTime.now();
+    if (_lastPrintInvocationTime != null &&
+        now.difference(_lastPrintInvocationTime!) < const Duration(seconds: 3)) {
+      debugPrint("FlutterPrintChannel: duplicate print message dropped");
+      return;
+    }
+    _lastPrintInvocationTime = now;
+
     try {
       final data = jsonDecode(payload) as Map<String, dynamic>;
       final action = data['action'] as String? ?? 'print';
@@ -272,33 +282,44 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
           return data;
         }
 
-        function triggerNativePrint() {
-          try {
-            var data = extractComplaintData();
-            if (window.FlutterPrintChannel) {
-              window.FlutterPrintChannel.postMessage(JSON.stringify(data));
+        if (!window.__kda_print_interceptor_installed) {
+          window.__kda_print_interceptor_installed = true;
+
+          var _lastPrintTimestamp = 0;
+          function triggerNativePrint() {
+            var now = Date.now();
+            if (now - _lastPrintTimestamp < 3000) {
+              return;
             }
-          } catch(e) {
-            console.error('Trigger print error:', e);
+            _lastPrintTimestamp = now;
+
+            try {
+              var data = extractComplaintData();
+              if (window.FlutterPrintChannel) {
+                window.FlutterPrintChannel.postMessage(JSON.stringify(data));
+              }
+            } catch(e) {
+              console.error('Trigger print error:', e);
+            }
           }
+
+          window.print = triggerNativePrint;
+
+          // Attach delegated listener on all print buttons and links (only once)
+          document.addEventListener('click', function(e) {
+            var btn = e.target.closest('button, a, .btn');
+            if (btn) {
+              var onclickAttr = (btn.getAttribute('onclick') || '').toLowerCase();
+              var txt = (btn.textContent || '').toLowerCase();
+              var hasPrintIcon = btn.querySelector('.fa-print, .fas.fa-print, [class*="print"]');
+              if (onclickAttr.indexOf('print') !== -1 || txt.indexOf('print') !== -1 || hasPrintIcon) {
+                e.preventDefault();
+                e.stopPropagation();
+                triggerNativePrint();
+              }
+            }
+          }, true);
         }
-
-        window.print = triggerNativePrint;
-
-        // Attach delegated listener on all print buttons and links
-        document.addEventListener('click', function(e) {
-          var btn = e.target.closest('button, a, .btn');
-          if (btn) {
-            var onclickAttr = (btn.getAttribute('onclick') || '').toLowerCase();
-            var txt = (btn.textContent || '').toLowerCase();
-            var hasPrintIcon = btn.querySelector('.fa-print, .fas.fa-print, [class*="print"]');
-            if (onclickAttr.indexOf('print') !== -1 || txt.indexOf('print') !== -1 || hasPrintIcon) {
-              e.preventDefault();
-              e.stopPropagation();
-              triggerNativePrint();
-            }
-          }
-        }, true);
         // 1. Hide Citizen Login and Install App items
         var citizenElements = document.querySelectorAll(
           'a[href*="/auth/login"]:not([href*="department"]), ' +
