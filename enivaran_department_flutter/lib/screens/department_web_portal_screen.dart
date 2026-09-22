@@ -94,13 +94,15 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
   void _handlePrintMessage(String payload) async {
     try {
       final data = jsonDecode(payload) as Map<String, dynamic>;
-      final title = data['title'] as String? ?? 'KDA-Complaint-Print';
-      final url = data['url'] as String? ?? ApiConfig.baseUrl;
-
-      await _printChannel.invokeMethod('print', {
-        'url': url,
-        'title': title,
-      });
+      final action = data['action'] as String? ?? 'print';
+      if (action == 'printComplaint') {
+        await _printChannel.invokeMethod('printComplaint', data);
+      } else {
+        await _printChannel.invokeMethod('print', {
+          'url': data['url'] as String? ?? ApiConfig.baseUrl,
+          'title': data['title'] as String? ?? 'KDA-Complaint-Print',
+        });
+      }
     } catch (e) {
       debugPrint("FlutterPrintChannel error: $e");
     }
@@ -115,116 +117,143 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
     _controller.runJavaScript(r"""
       (function() {
         // ── Window.print Interception for Native Android Print Spooler ──
-        function triggerNativePrint() {
+        function extractComplaintData() {
+          var data = {
+            action: 'printComplaint',
+            url: window.location.href,
+            complaintNo: '',
+            status: '',
+            priority: '',
+            title: '',
+            description: '',
+            slaDeadline: '',
+            type: '',
+            subType: '',
+            zone: '',
+            address: '',
+            citizenPhotoBase64: '',
+            citizenPhotoUrl: '',
+            history: []
+          };
+
           try {
-            // Ensure print styles are injected directly into document head
-            var styleEl = document.getElementById('kda-native-print-override');
-            if (!styleEl) {
-              styleEl = document.createElement('style');
-              styleEl.id = 'kda-native-print-override';
-              styleEl.textContent = `
-                @media print {
-                  body {
-                    background: #ffffff !important;
-                    color: #1a1a2e !important;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
-                    font-size: 13px !important;
-                    line-height: 1.5 !important;
-                  }
-                  .print-header {
-                    display: flex !important;
-                    align-items: center !important;
-                    gap: 16px !important;
-                    background: #ffffff !important;
-                    border-bottom: 3px solid #1e293b !important;
-                    padding: 10px 0 16px 0 !important;
-                    margin-bottom: 20px !important;
-                  }
-                  .print-header-logo {
-                    height: 80px !important;
-                    width: auto !important;
-                    display: block !important;
-                  }
-                  .print-header-title {
-                    font-size: 26px !important;
-                    font-weight: 800 !important;
-                    color: #1a1a2e !important;
-                    line-height: 1.1 !important;
-                  }
-                  .print-header-title-accent {
-                    color: #4361ee !important;
-                    font-style: italic !important;
-                  }
-                  .print-header-subtitle {
-                    font-size: 16px !important;
-                    font-weight: 600 !important;
-                    color: #475569 !important;
-                    margin-top: 4px !important;
-                  }
-                  .breadcrumb, .btn, .modal, nav, .sidebar, .navbar, .file-drop, a.link-primary, .section-header .d-flex.flex-wrap.gap-3, #installPwaBtn, .install-app-btn, .install-banner {
-                    display: none !important;
-                  }
-                  .row.g-4, .row {
-                    display: block !important;
-                    margin: 0 !important;
-                  }
-                  .col-lg-8, .col-lg-4, .col-md-6, .col-12 {
-                    width: 100% !important;
-                    max-width: 100% !important;
-                    flex: 0 0 100% !important;
-                    padding: 0 !important;
-                  }
-                  .card {
-                    background: #ffffff !important;
-                    color: #0f172a !important;
-                    border: 1px solid #cbd5e1 !important;
-                    border-radius: 8px !important;
-                    box-shadow: none !important;
-                    margin-bottom: 18px !important;
-                    page-break-inside: avoid !important;
-                  }
-                  .card-header {
-                    background: #f8fafc !important;
-                    color: #0f172a !important;
-                    font-weight: 700 !important;
-                    border-bottom: 1px solid #cbd5e1 !important;
-                    padding: 10px 16px !important;
-                  }
-                  .card-body {
-                    background: #ffffff !important;
-                    color: #0f172a !important;
-                    padding: 16px !important;
-                  }
-                  .badge {
-                    border: 1px solid #94a3b8 !important;
-                    color: #0f172a !important;
-                    font-weight: 600 !important;
-                    padding: 4px 8px !important;
-                  }
-                  img {
-                    max-width: 100% !important;
-                    height: auto !important;
+            // Complaint No
+            var titleEl = document.querySelector('.page-title, h1');
+            if (titleEl) data.complaintNo = titleEl.textContent.trim();
+
+            // Status & Priority badges
+            var badges = document.querySelectorAll('.section-header .badge');
+            badges.forEach(function(b) {
+              var txt = b.textContent.trim();
+              var cls = (b.className || '').toLowerCase();
+              if (cls.indexOf('status-') !== -1 || (!data.status && txt.indexOf('Priority') === -1)) {
+                data.status = txt;
+              } else if (cls.indexOf('priority-') !== -1 || txt.indexOf('Priority') !== -1) {
+                data.priority = txt;
+              }
+            });
+
+            // Complaint Details Card
+            var cards = document.querySelectorAll('.card');
+            cards.forEach(function(card) {
+              var headerEl = card.querySelector('.card-header, .card-title');
+              var headerTxt = (headerEl ? headerEl.textContent : '').toLowerCase();
+              if (headerTxt.indexOf('complaint details') !== -1) {
+                var h5 = card.querySelector('h5');
+                if (h5) data.title = h5.textContent.trim();
+
+                var pDesc = card.querySelector('.card-body > p.text-muted, .card-body > p');
+                if (pDesc) data.description = pDesc.textContent.trim();
+
+                var detailItems = card.querySelectorAll('.detail-item');
+                detailItems.forEach(function(item) {
+                  var lblEl = item.querySelector('label');
+                  var spanEl = item.querySelector('span');
+                  var lbl = (lblEl ? lblEl.textContent : '').trim().toUpperCase();
+                  var val = (spanEl ? spanEl.textContent : '').trim();
+                  if (lbl.indexOf('COMPLAINT NO') !== -1 && val) data.complaintNo = val;
+                  else if (lbl.indexOf('SLA') !== -1) data.slaDeadline = val;
+                  else if (lbl.indexOf('SUB TYPE') !== -1) data.subType = val;
+                  else if (lbl.indexOf('TYPE') !== -1) data.type = val;
+                  else if (lbl.indexOf('ZONE') !== -1) data.zone = val;
+                });
+
+                var addrEl = card.querySelector('.card-body p:has(.fa-map-marker-alt), p i.fa-map-marker-alt');
+                if (addrEl) {
+                  var pParent = addrEl.closest('p');
+                  if (pParent) {
+                    data.address = pParent.textContent.trim().replace(/^Address\s*/i, '');
                   }
                 }
-              `;
-              document.head.appendChild(styleEl);
-            }
+              } else if (headerTxt.indexOf('citizen') !== -1 || headerTxt.indexOf('submitted') !== -1) {
+                var img = card.querySelector('img.kda-thumb, img');
+                if (img && img.src) {
+                  data.citizenPhotoUrl = img.src;
+                  try {
+                    var canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth || img.width || 300;
+                    canvas.height = img.naturalHeight || img.height || 200;
+                    var ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    data.citizenPhotoBase64 = canvas.toDataURL('image/jpeg', 0.85);
+                  } catch(e) {}
+                }
+              } else if (headerTxt.indexOf('history') !== -1) {
+                var timelineItems = card.querySelectorAll('.timeline-item');
+                timelineItems.forEach(function(item) {
+                  var actEl = item.querySelector('.timeline-action');
+                  var durEl = item.querySelector('.badge.bg-light, .badge');
+                  var timEl = item.querySelector('.timeline-time');
+                  var byEl = item.querySelector('.timeline-by');
+                  var remEl = item.querySelector('.timeline-body');
+                  var act = actEl ? actEl.textContent.trim() : '';
+                  var dur = durEl ? durEl.textContent.trim() : '';
+                  var tim = timEl ? timEl.textContent.trim() : '';
+                  var by = byEl ? byEl.textContent.trim() : '';
+                  var rem = remEl ? remEl.textContent.trim() : '';
+                  if (act || tim || by) {
+                    data.history.push({
+                      action: act,
+                      duration: dur,
+                      time: tim,
+                      by: by,
+                      remarks: rem
+                    });
+                  }
+                });
+              }
+            });
 
-            var title = 'KDA-Complaint-Print';
-            var headerEl = document.querySelector('h1, h2, h3, .page-title, .print-header-title');
-            if (headerEl && headerEl.textContent.trim()) {
-              title = headerEl.textContent.trim();
+            // Fallback for photo if not found inside card
+            if (!data.citizenPhotoUrl) {
+              var anyImg = document.querySelector('.kda-gallery-item img, img.kda-thumb');
+              if (anyImg && anyImg.src) {
+                data.citizenPhotoUrl = anyImg.src;
+                try {
+                  var canvas = document.createElement('canvas');
+                  canvas.width = anyImg.naturalWidth || anyImg.width || 300;
+                  canvas.height = anyImg.naturalHeight || anyImg.height || 200;
+                  var ctx = canvas.getContext('2d');
+                  ctx.drawImage(anyImg, 0, 0);
+                  data.citizenPhotoBase64 = canvas.toDataURL('image/jpeg', 0.85);
+                } catch(e) {}
+              }
             }
+          } catch(err) {
+            console.error('Data extract error:', err);
+          }
 
+          return data;
+        }
+
+        function triggerNativePrint() {
+          try {
+            var data = extractComplaintData();
             if (window.FlutterPrintChannel) {
-              window.FlutterPrintChannel.postMessage(JSON.stringify({
-                action: 'print',
-                title: title,
-                url: window.location.href
-              }));
+              window.FlutterPrintChannel.postMessage(JSON.stringify(data));
             }
-          } catch (err) {
-            console.error('Print channel error:', err);
+          } catch(e) {
+            console.error('Trigger print error:', e);
           }
         }
 
