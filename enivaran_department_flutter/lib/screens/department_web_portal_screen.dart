@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../config/api_config.dart';
 
@@ -27,6 +29,12 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0F172A))
+      ..addJavaScriptChannel(
+        'PrintChannel',
+        onMessageReceived: (JavaScriptMessage message) {
+          _handlePrint();
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (int progress) {
@@ -80,6 +88,60 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
         ),
       )
       ..loadRequest(Uri.parse(targetUrl));
+  }
+
+  Future<void> _handlePrint() async {
+    try {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                ),
+                SizedBox(width: 12),
+                Text("Opening Print / Save as PDF..."),
+              ],
+            ),
+            duration: Duration(seconds: 2),
+            backgroundColor: Color(0xFF1E293B),
+          ),
+        );
+      }
+
+      String title = "Complaint_Details";
+      try {
+        final rawTitle = await _controller.runJavaScriptReturningResult("document.title");
+        var titleStr = rawTitle.toString().replaceAll('"', '').trim();
+        if (titleStr.isNotEmpty && titleStr != "null") title = titleStr;
+      } catch (_) {}
+
+      final rawHtml = await _controller.runJavaScriptReturningResult("document.documentElement.outerHTML");
+      String html = rawHtml.toString();
+      try {
+        final decoded = jsonDecode(html);
+        if (decoded is String) html = decoded;
+      } catch (_) {}
+
+      const platform = MethodChannel('in.gov.rajasthan.kdakota.enivaran/print');
+      await platform.invokeMethod('printHtml', {
+        'html': html,
+        'title': title,
+      });
+    } catch (e) {
+      debugPrint("Print handler error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Print error: $e"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
   }
 
   void _injectPortalModifications() {
@@ -584,12 +646,47 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
             if (!emptyBox) {
               emptyBox = document.createElement('div');
               emptyBox.className = 'chart-empty-state text-center p-3';
-              emptyBox.innerHTML = '<div style="font-size:32px;margin-bottom:8px">📊</div><div style="font-weight:600;font-size:14px;color:#94a3b8">All Grievances Addressed</div><div style="font-size:12px;color:#64748b">No active complaints pending in queue</div>';
               chartCanvas.style.display = 'none';
               chartCanvas.parentNode.appendChild(emptyBox);
             }
           }
         }
+
+        // 4. Intercept window.print and Print Buttons for native Android printing
+        window.print = function() {
+          if (window.PrintChannel) {
+            window.PrintChannel.postMessage('print');
+          }
+        };
+
+        function attachPrintListeners() {
+          var allPrintButtons = document.querySelectorAll(
+            'button[onclick*="print"], ' +
+            'a[onclick*="print"], ' +
+            '.btn-outline-primary, ' +
+            'button, .btn'
+          );
+          for (var pb = 0; pb < allPrintButtons.length; pb++) {
+            var item = allPrintButtons[pb];
+            var oc = (item.getAttribute('onclick') || '').toLowerCase();
+            var inner = (item.innerHTML || '').toLowerCase();
+            var text = (item.textContent || '').toLowerCase();
+            if (oc.includes('print') || text.includes('print') || inner.includes('fa-print')) {
+              if (!item.dataset.printHooked) {
+                item.dataset.printHooked = 'true';
+                item.addEventListener('click', function(ev) {
+                  if (window.PrintChannel) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    window.PrintChannel.postMessage('print');
+                  }
+                }, true);
+              }
+            }
+          }
+        }
+        attachPrintListeners();
+        setInterval(attachPrintListeners, 1000);
       })();
     """);
   }

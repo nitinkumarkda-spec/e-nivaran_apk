@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../config/api_config.dart';
 
@@ -27,6 +29,12 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0F172A))
+      ..addJavaScriptChannel(
+        'PrintChannel',
+        onMessageReceived: (JavaScriptMessage message) {
+          _handlePrint();
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (int progress) {
@@ -82,6 +90,60 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
       ..loadRequest(Uri.parse(targetUrl));
   }
 
+  Future<void> _handlePrint() async {
+    try {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                ),
+                SizedBox(width: 12),
+                Text("Opening Print / Save as PDF..."),
+              ],
+            ),
+            duration: Duration(seconds: 2),
+            backgroundColor: Color(0xFF1E293B),
+          ),
+        );
+      }
+
+      String title = "Complaint_Details";
+      try {
+        final rawTitle = await _controller.runJavaScriptReturningResult("document.title");
+        var titleStr = rawTitle.toString().replaceAll('"', '').trim();
+        if (titleStr.isNotEmpty && titleStr != "null") title = titleStr;
+      } catch (_) {}
+
+      final rawHtml = await _controller.runJavaScriptReturningResult("document.documentElement.outerHTML");
+      String html = rawHtml.toString();
+      try {
+        final decoded = jsonDecode(html);
+        if (decoded is String) html = decoded;
+      } catch (_) {}
+
+      const platform = MethodChannel('in.gov.rajasthan.kdakota.enivaran/print');
+      await platform.invokeMethod('printHtml', {
+        'html': html,
+        'title': title,
+      });
+    } catch (e) {
+      debugPrint("Print handler error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Print error: $e"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
   void _injectPortalModifications() {
     // Injected script handles:
     // 1. Completely removing 'Go to Citizen', 'Citizen Login', and 'Install App'
@@ -103,29 +165,13 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
         }
 
         // Hide profile dropdown items that lead to citizen or install app
-        var dropdownLinks = document.querySelectorAll('.dropdown-menu a, .dropdown-menu li');
+        var dropdownLinks = document.querySelectorAll('.dropdown-menu a');
         for (var j = 0; j < dropdownLinks.length; j++) {
-          var txt = (dropdownLinks[j].textContent || '').toLowerCase().trim();
+          var txt = (dropdownLinks[j].textContent || '').toLowerCase();
           var h = (dropdownLinks[j].getAttribute('href') || '').toLowerCase();
-          if (txt === 'install app' || txt.includes('install app') || txt.includes('citizen') || 
+          if (txt.includes('citizen') || txt.includes('install app') || 
               (h.includes('/auth/login') && !h.includes('department'))) {
             dropdownLinks[j].style.display = 'none';
-            dropdownLinks[j].style.visibility = 'hidden';
-            dropdownLinks[j].style.height = '0';
-            dropdownLinks[j].style.overflow = 'hidden';
-            dropdownLinks[j].style.padding = '0';
-            dropdownLinks[j].style.margin = '0';
-          }
-        }
-
-        // Also scan ALL links/buttons for Install App text and hide them
-        var allLinks = document.querySelectorAll('a, button, li');
-        for (var k = 0; k < allLinks.length; k++) {
-          var elText = (allLinks[k].textContent || '').trim();
-          if (elText === 'Install App' || elText === 'इंस्टॉल करें') {
-            var parent = allLinks[k].closest('li') || allLinks[k];
-            parent.style.setProperty('display', 'none', 'important');
-            parent.style.setProperty('visibility', 'hidden', 'important');
           }
         }
 
@@ -391,10 +437,11 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
               opacity: 0.95 !important;
               font-size: 11.5px !important;
             }
+            /* Department Badge Styling */
             .dept-mobile-badge {
               display: inline-block;
-              background: #e3861c;
-              color: #fff;
+              background: #e3861c !important;
+              color: #fff !important;
               padding: 3px 8px;
               border-radius: 6px;
               font-size: 11px;
@@ -438,20 +485,157 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
               background: #e3861c !important;
               color: #ffffff !important;
             }
-            /* Force hide Install App everywhere in native APK */
-            a[href*="install"], a[href*="pwa"],
-            [id*="install"], [id*="pwa"],
-            .install-app-btn {
-              display: none !important;
-            }
-            /* Primary color overrides for #e3861c consistency */
+
+            /* Global Department Portal #e3861c brand color overrides */
+            /* Global Department Portal #e3861c brand color overrides */
             :root {
               --primary: #e3861c !important;
               --bs-primary: #e3861c !important;
+              --primary-color: #e3861c !important;
+            }
+
+            /* 1. Continue Button - Exact Match #e3861c */
+            #btn-staff-continue,
+            .btn-register-submit,
+            button:has([data-i18n="continue_btn"]),
+            button:has(.fa-paper-plane),
+            #btn-send-otp,
+            .btn-continue {
+              background: #e3861c !important;
+              background-color: #e3861c !important;
+              background-image: none !important;
+              border: none !important;
+              color: #ffffff !important;
+              box-shadow: 0 4px 16px rgba(227, 134, 28, 0.4) !important;
+            }
+            #btn-staff-continue:hover,
+            #btn-staff-continue:focus,
+            #btn-staff-continue:active,
+            .btn-register-submit:hover,
+            .btn-register-submit:focus,
+            .btn-register-submit:active {
+              background: #cf7313 !important;
+              background-color: #cf7313 !important;
+              background-image: none !important;
+              color: #ffffff !important;
+            }
+
+            /* 2. Mobile Menu Bar Toggle Button - Exact Match #e3861c */
+            #mobileMenuToggleBtn,
+            .mobile-menu-toggle,
+            button:has(#mobileMenuIcon),
+            button:has(i.fa-bars) {
+              background: #e3861c !important;
+              background-color: #e3861c !important;
+              background-image: none !important;
+              border: none !important;
+              color: #ffffff !important;
+              box-shadow: 0 4px 14px rgba(227, 134, 28, 0.35) !important;
+            }
+            #mobileMenuToggleBtn i,
+            .mobile-menu-toggle i,
+            #mobileMenuIcon {
+              color: #ffffff !important;
+            }
+
+            /* 3. Departmental Icon & Card Accent */
+            .rounded-circle:has(> i.fa-building),
+            div:has(> i.fa-building) {
+              background: #e3861c !important;
+              background-color: #e3861c !important;
+              background-image: none !important;
+              box-shadow: 0 4px 14px rgba(227, 134, 28, 0.35) !important;
+            }
+
+            .btn-primary, .btn-primary:focus, .btn-primary:active,
+            .btn-hero-primary, .btn-modern-primary,
+            button[type="submit"], input[type="submit"],
+            .bg-primary, .bg-orange, .btn-orange {
+              background: #e3861c !important;
+              background-color: #e3861c !important;
+              background-image: none !important;
+              border-color: #e3861c !important;
+              color: #ffffff !important;
+            }
+            .text-orange, .text-primary {
+              color: #e3861c !important;
             }
           `;
           document.head.appendChild(style);
         }
+
+        // Apply direct inline styling for Continue button & Menu toggle
+        function applyDeptColors() {
+          var continueBtn = document.getElementById('btn-staff-continue');
+          if (continueBtn) {
+            continueBtn.style.setProperty('background', '#e3861c', 'important');
+            continueBtn.style.setProperty('background-color', '#e3861c', 'important');
+            continueBtn.style.setProperty('background-image', 'none', 'important');
+            continueBtn.style.setProperty('box-shadow', '0 4px 16px rgba(227, 134, 28, 0.4)', 'important');
+            continueBtn.style.setProperty('color', '#ffffff', 'important');
+          }
+          var menuBtn = document.getElementById('mobileMenuToggleBtn');
+          if (menuBtn) {
+            menuBtn.style.setProperty('background', '#e3861c', 'important');
+            menuBtn.style.setProperty('background-color', '#e3861c', 'important');
+            menuBtn.style.setProperty('background-image', 'none', 'important');
+            menuBtn.style.setProperty('box-shadow', '0 4px 14px rgba(227, 134, 28, 0.35)', 'important');
+            menuBtn.style.setProperty('color', '#ffffff', 'important');
+          }
+          var allBtns = document.querySelectorAll('button, .btn');
+          for (var b = 0; b < allBtns.length; b++) {
+            var bTxt = (allBtns[b].textContent || '').trim();
+            if (bTxt === 'Continue' || bTxt === 'आगे बढ़ें') {
+              allBtns[b].style.setProperty('background', '#e3861c', 'important');
+              allBtns[b].style.setProperty('background-color', '#e3861c', 'important');
+              allBtns[b].style.setProperty('background-image', 'none', 'important');
+              allBtns[b].style.setProperty('box-shadow', '0 4px 16px rgba(227, 134, 28, 0.4)', 'important');
+              allBtns[b].style.setProperty('color', '#ffffff', 'important');
+            }
+          }
+          var buildingIcons = document.querySelectorAll('.fa-building');
+          for (var k = 0; k < buildingIcons.length; k++) {
+            var parentCircle = buildingIcons[k].closest('.rounded-circle') || buildingIcons[k].parentElement;
+            if (parentCircle) {
+              parentCircle.style.setProperty('background', '#e3861c', 'important');
+              parentCircle.style.setProperty('background-color', '#e3861c', 'important');
+              parentCircle.style.setProperty('background-image', 'none', 'important');
+            }
+          }
+
+          // Card accent line
+          var topLines = document.querySelectorAll('.card-top-accent-line, div[style*="height: 6px"], div[style*="height:6px"]');
+          for (var tl = 0; tl < topLines.length; tl++) {
+            topLines[tl].style.setProperty('background', '#e3861c', 'important');
+            topLines[tl].style.setProperty('background-color', '#e3861c', 'important');
+          }
+
+          // Role display and user info card text
+          var roleDisp = document.getElementById('staff-role-display');
+          if (roleDisp) {
+            roleDisp.style.setProperty('color', '#ffffff', 'important');
+            roleDisp.style.setProperty('background', 'rgba(227, 134, 28, 0.25)', 'important');
+            roleDisp.style.setProperty('border', '1px solid rgba(227, 134, 28, 0.6)', 'important');
+          }
+          var mobDisp = document.getElementById('staff-mobile-display');
+          if (mobDisp) {
+            mobDisp.style.setProperty('color', '#ffffff', 'important');
+          }
+          var swalConfirms = document.querySelectorAll('.swal2-confirm, button.swal2-confirm');
+          for (var sc = 0; sc < swalConfirms.length; sc++) {
+            swalConfirms[sc].style.setProperty('background-color', '#e3861c', 'important');
+            swalConfirms[sc].style.setProperty('background', '#e3861c', 'important');
+            swalConfirms[sc].style.setProperty('border', 'none', 'important');
+            swalConfirms[sc].style.setProperty('color', '#ffffff', 'important');
+          }
+          var logoSubs = document.querySelectorAll('.mobile-logo-subtitle');
+          for (var ls = 0; ls < logoSubs.length; ls++) {
+            logoSubs[ls].style.setProperty('color', '#cbd5e1', 'important');
+            logoSubs[ls].style.setProperty('display', 'block', 'important');
+          }
+        }
+        applyDeptColors();
+        setInterval(applyDeptColors, 400);
 
         // 3. Fix Empty Chart state if canvas has 0 items
         var chartCanvas = document.getElementById('statusChart');
@@ -462,23 +646,47 @@ class _DepartmentWebPortalScreenState extends State<DepartmentWebPortalScreen> {
             if (!emptyBox) {
               emptyBox = document.createElement('div');
               emptyBox.className = 'chart-empty-state text-center p-3';
-              emptyBox.innerHTML = '<div style="font-size:32px;margin-bottom:8px">📊</div><div style="font-weight:600;font-size:14px;color:#94a3b8">All Grievances Addressed</div><div style="font-size:12px;color:#64748b">No active complaints pending in queue</div>';
               chartCanvas.style.display = 'none';
               chartCanvas.parentNode.appendChild(emptyBox);
             }
           }
         }
 
-        // 4. Dark Mode logout fix: reset dark theme on /auth/login navigation
-        var currentUrl = window.location.href;
-        if (currentUrl.includes('/auth/login') || currentUrl.includes('/auth/department-login')) {
-          // Ensure correct theme state on login screen – default to light if no pref stored
-          var savedTheme = localStorage.getItem('sitetheme') || localStorage.getItem('theme') || 'light';
-          if (savedTheme === 'light' || savedTheme === '') {
-            document.documentElement.removeAttribute('data-theme');
-            document.body.classList.remove('dark-mode');
+        // 4. Intercept window.print and Print Buttons for native Android printing
+        window.print = function() {
+          if (window.PrintChannel) {
+            window.PrintChannel.postMessage('print');
+          }
+        };
+
+        function attachPrintListeners() {
+          var allPrintButtons = document.querySelectorAll(
+            'button[onclick*="print"], ' +
+            'a[onclick*="print"], ' +
+            '.btn-outline-primary, ' +
+            'button, .btn'
+          );
+          for (var pb = 0; pb < allPrintButtons.length; pb++) {
+            var item = allPrintButtons[pb];
+            var oc = (item.getAttribute('onclick') || '').toLowerCase();
+            var inner = (item.innerHTML || '').toLowerCase();
+            var text = (item.textContent || '').toLowerCase();
+            if (oc.includes('print') || text.includes('print') || inner.includes('fa-print')) {
+              if (!item.dataset.printHooked) {
+                item.dataset.printHooked = 'true';
+                item.addEventListener('click', function(ev) {
+                  if (window.PrintChannel) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    window.PrintChannel.postMessage('print');
+                  }
+                }, true);
+              }
+            }
           }
         }
+        attachPrintListeners();
+        setInterval(attachPrintListeners, 1000);
       })();
     """);
   }
