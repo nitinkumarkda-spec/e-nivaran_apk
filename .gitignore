@@ -1,47 +1,32 @@
-# Build & Dependency Artifacts
-.dart_tool/
+# Flutter & Android Build Artifacts (ignore cache)
+**/build/
 **/.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
+**/.flutter-plugins*
 .packages
 .pub-cache/
 .pub/
-build/
-**/build/
 
 # Android Specific
-android/.gradle/
 **/android/.gradle/
-android/app/build/
 **/android/app/build/
-android/local.properties
 **/android/local.properties
 *.dex
 *.class
 
-# Binaries & Packaging
-*.apk
-*.aab
-*.ap_
-*.ipa
-*.zip
-
-# iOS Builds
-ios/.generated/
-ios/Pods/
+# iOS ephemeral
 **/ios/Pods/
-ios/Flutter/ephemeral/
+**/ios/.symlinks/
 **/ios/Flutter/ephemeral/
 **/ios/DerivedData/
 
-# IDE & Editor Cache
+# IDE
 .idea/
 *.iml
 .vscode/
-*.swp
-*.swo
 
-# OS files
+# System
 .DS_Store
 Thumbs.db
-ehthumbs.db
+
+# Allow compiled release APKs inside the apks folder
+!apks/*.apk
